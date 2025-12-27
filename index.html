@@ -104,6 +104,42 @@
   const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   window.sb = sb;
 
+    // === FIX: procesar Magic Link al volver (sin suposiciones) ===
+  (async () => {
+    try {
+      const url = new URL(window.location.href);
+
+      // Caso 1: magic link con query params token_hash & type (ej: ?token_hash=...&type=magiclink)
+      const token_hash = url.searchParams.get('token_hash');
+      const type = url.searchParams.get('type');
+      if (token_hash && type) {
+        const { error } = await sb.auth.verifyOtp({ type, token_hash });
+        if (error) console.error('verifyOtp error:', error);
+        // limpiar URL
+        url.searchParams.delete('token_hash');
+        url.searchParams.delete('type');
+        history.replaceState(null, '', url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : ''));
+        return;
+      }
+
+      // Caso 2: magic link con hash tokens (ej: #access_token=...&refresh_token=...)
+      const h = window.location.hash || '';
+      if (h.includes('access_token=') && h.includes('refresh_token=')) {
+        const p = new URLSearchParams(h.replace(/^#/, ''));
+        const access_token = p.get('access_token');
+        const refresh_token = p.get('refresh_token');
+        if (access_token && refresh_token) {
+          const { error } = await sb.auth.setSession({ access_token, refresh_token });
+          if (error) console.error('setSession error:', error);
+          // limpiar hash
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      }
+    } catch (e) {
+      console.error('Magic link handler error:', e);
+    }
+  })();
+
   const tabDet = document.getElementById('tabDet');
   const tabOp  = document.getElementById('tabOp');
   const frameDet = document.getElementById('frameDet');
