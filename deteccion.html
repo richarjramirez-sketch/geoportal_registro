@@ -175,7 +175,20 @@
 const SUPABASE_URL = "https://tewrzarmckrztcrmgfjo.supabase.co";
 const SUPABASE_KEY =
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRld3J6YXJtY2tyenRjcm1nZmpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0ODQ3NTksImV4cCI6MjA3NzA2MDc1OX0.xeQnYEVAV_eIy7zVxFU9W2Fd0xjuF4v-tQjM2REPtCc";
-var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// ✅ Crear SOLO una instancia global (evita múltiples GoTrueClient y promesas pending)
+if (!window.sb) {
+  window.sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: { fetch: window.fetch },
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
+}
+
+// Mantener tu código igual: aquí usas "supabase" como antes
+var supabase = window.sb;
 
 /* ================== MAPA ================== */
 const map = L.map('map', { boxZoom:true, maxZoom: 17 }).setView([-9.2, -75], 5);
