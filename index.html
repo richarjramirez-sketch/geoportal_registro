@@ -118,6 +118,22 @@
 
   let __userAccess = null; // { role, anp_cod }
 
+
+  // --- Garantizar entrega de permisos a iframes ---
+  function pushAccessTo(frame){
+    if(!__userAccess) return;
+    try { frame?.contentWindow?.postMessage({ type:'set_anp', ...__userAccess }, '*'); } catch(e) {}
+  }
+  function pushAccessAll(){
+    pushAccessTo(frameDet);
+    pushAccessTo(frameOp);
+  }
+
+  // Si el postMessage se envía antes de que el iframe termine de cargar,
+  // se puede perder. Reenviamos cuando cada iframe cargue.
+  frameDet.addEventListener('load', ()=> pushAccessTo(frameDet));
+  frameOp.addEventListener('load',  ()=> pushAccessTo(frameOp));
+
   function activate(which){
     const isDet = which === 'det';
     frameDet.classList.toggle('active', isDet);
