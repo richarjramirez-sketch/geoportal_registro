@@ -1,0 +1,1240 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Geoportal – Detección Minería Ilegal en ANP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Proj4js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.2/proj4.js"></script>
+
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:#0f172a; color:#e5e7eb; }
+    header { 
+      padding:12px 16px; 
+      background:#020617; 
+      border-bottom:1px solid #1e293b;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .user-info {
+      font-size:12px;
+      color:#94a3b8;
+    }
+    .logout-btn {
+      background:#dc2626;
+      color:white;
+      border:none;
+      padding:6px 12px;
+      border-radius:6px;
+      cursor:pointer;
+      font-size:12px;
+      margin-left:12px;
+    }
+    .logout-btn:hover {
+      background:#b91c1c;
+    }
+    main { display:grid; grid-template-columns: 420px 1fr; height:calc(100vh - 50px); }
+    aside { padding:14px; background:#020617; overflow:auto; }
+    #map { height:100%; }
+    h3 { margin:12px 0 6px; font-size:14px; color:#93c5fd; }
+    label { font-size:12px; display:block; margin-top:8px; color:#cbd5f5; }
+    input, select, textarea {
+      width:100%; padding:8px; border-radius:6px;
+      border:1px solid #334155; background:#020617; color:#e5e7eb;
+    }
+    input[readonly]{ background:#0b1220; cursor:not-allowed; color:#dbeafe; }
+    input:disabled, textarea:disabled, select:disabled { opacity:0.75; cursor:not-allowed; }
+    textarea { resize:vertical; }
+    .row2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
+    button {
+      margin-top:10px; padding:8px; width:100%;
+      background:#2563eb; border:none; border-radius:6px;
+      color:white; font-weight:bold; cursor:pointer;
+    }
+    button.secondary { background:#0ea5e9; }
+    button.tertiary { background:#475569; }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    .msg { margin-top:10px; font-size:12px; padding:8px; border-radius:6px; }
+    .ok { background:#064e3b; }
+    .err { background:#7f1d1d; }
+    .pill {
+      display:inline-block; padding:4px 8px; border-radius:999px;
+      background:#111827; border:1px solid #334155; font-size:12px;
+      color:#e5e7eb; margin-top:8px;
+    }
+    .latlon-hidden{display:none;}
+    .leaflet-tooltip.puesto-label{
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: bold;
+      text-shadow: 0 0 3px #000;
+      padding: 0;
+    }
+    .list { margin-top:8px; }
+    .item { background:#111827; padding:8px; border-radius:6px; margin-top:8px; border:1px solid #334155; font-size:12px; }
+    button.mini { background:#dc2626; padding:4px 8px; width:auto; margin-top:6px; font-size:11px; border-radius:6px; }
+    .anp-locked {
+      background:#1e3a8a !important;
+      border:1px solid #3b82f6 !important;
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <b>Geoportal – Detección de Minería Ilegal en ANP</b>
+  <div style="display:flex; align-items:center;">
+    <span class="user-info" id="userInfo"></span>
+    <button class="logout-btn" onclick="logout()">Cerrar Sesión</button>
+  </div>
+</header>
+
+<main>
+  <aside>
+    <h3>1) Seleccionar ANP</h3>
+    <label>Área Natural Protegida</label>
+    <select id="anpSelect" class="anp-locked">
+      <option value="">— Verificando acceso —</option>
+    </select>
+
+    <h3>2) Detección – Evento (una sola vez)</h3>
+    <label>dete_id</label>
+    <input id="deteId" readonly>
+    <label>usuario_creacion</label>
+    <input id="usuarioCreacion" placeholder="Ej: richar.ramirez">
+
+    <label>fecha_dete</label>
+    <input type="date" id="fechaDete">
+
+    <label>fuente_dete</label>
+    <select id="fuenteDete">
+      <option value="">— Cargando fuentes —</option>
+    </select>
+
+    <label>observación</label>
+    <textarea id="obsDete"></textarea>
+
+    <button id="saveEventoBtn">Guardar evento</button>
+    <div class="pill" id="estadoEvento">Estado evento: NO guardado</div>
+
+    <h3>3) Ubicación (coordenada / sitio)</h3>
+    <p style="font-size:12px;color:#94a3b8; margin:6px 0 10px;">
+      • Clic en el mapa: seleccionar ubicación<br>
+      • <b>Shift + arrastrar</b>: seleccionar centro de zona
+    </p>
+
+    <div class="pill" id="estadoUbicacion">Ubicación activa: NO</div>
+
+    <div style="margin-top:0; padding:10px; border:1px solid rgba(148,163,184,.25); border-radius:12px;">
+      <div style="font-size:12px; color:#94a3b8; margin-bottom:8px;"><b>Coordenadas UTM (WGS84)</b> – ingreso principal (puedes editar)</div>
+      
+      <div class="row3">
+        <div>
+          <label>zona</label>
+          <input id="utmZona" placeholder="Ej: 19S">
+        </div>
+        <div>
+          <label>este (m)</label>
+          <input id="utmE" inputmode="decimal">
+        </div>
+        <div>
+          <label>norte (m)</label>
+          <input id="utmN" inputmode="decimal">
+        </div>
+      </div>
+      
+      <div class="row2 latlon-hidden">
+        <div>
+          <label>latitud (auto)</label>
+          <input id="lat" placeholder="Ej: -12.345678">
+        </div>
+        <div>
+          <label>longitud (auto)</label>
+          <input id="lng" placeholder="Ej: -69.123456">
+        </div>
+      </div>
+    </div>
+
+    <button id="saveUbicacionBtn" class="secondary" disabled>Guardar ubicación</button>
+    <button id="nuevaUbicacionBtn" class="tertiary" disabled>Nueva ubicación</button>
+
+    <h3>4) Componentes (N veces por ubicación)</h3>
+
+    <label>tipo_comp</label>
+    <select id="tipoComp" disabled>
+      <option value="">— Cargando tipos —</option>
+    </select>
+
+    <label>num_comp</label>
+    <input type="number" id="numComp" disabled>
+
+    <label>observación componente</label>
+    <textarea id="obsPunto" disabled></textarea>
+
+    <button id="addPuntoBtn" class="secondary" disabled>Agregar componente</button>
+
+    <div id="listaComponentes" class="list"><i style="color:#94a3b8">Sin componentes registrados</i></div>
+
+    <button id="finalizarUbicacionBtn" class="tertiary" disabled>Finalizar ubicación</button>
+    <button id="cerrarEventoBtn" class="tertiary" disabled>Cerrar evento</button>
+
+    <div class="pill" id="contadorPuntos">Ubicaciones: 0 | Componentes: 0</div>
+    <div id="msg" class="msg"></div>
+  </aside>
+
+  <div id="map"></div>
+</main>
+
+<script>
+/* ================== VERIFICACIÓN DE SESIÓN ================== */
+function checkSession() {
+  const sessionData = localStorage.getItem("anp_session");
+  
+  if (!sessionData) {
+    // No hay sesión, redirigir al login
+    alert("⚠️ Debe iniciar sesión para acceder al geoportal.");
+    window.location.href = "primer_vistazo_02.html";
+    return null;
+  }
+  
+  try {
+    const session = JSON.parse(sessionData);
+    
+    // Validar que tenga los campos necesarios
+    if (!session.anp_cod || !session.user_email) {
+      throw new Error("Sesión inválida");
+    }
+    
+    // Mostrar info del usuario en el header
+    document.getElementById("userInfo").textContent = 
+      `Usuario: ${session.user_email} | ANP: ${session.anp_cod}`;
+    
+    return session;
+    
+  } catch (err) {
+    console.error("Error al leer sesión:", err);
+    localStorage.removeItem("anp_session");
+    alert("⚠️ Sesión corrupta. Por favor inicie sesión nuevamente.");
+    window.location.href = "primer_vistazo_02.html";
+    return null;
+  }
+}
+
+function logout() {
+  if (confirm("¿Desea cerrar la sesión y volver al login?")) {
+    localStorage.removeItem("anp_session");
+    window.location.href = "primer_vistazo_02.html";
+  }
+}
+
+/* ================== MÓDULO DE UTILIDADES ================== */
+const Utils = {
+  DOM: {},
+
+  initDOMCache() {
+    const ids = [
+      'estadoEvento', 'estadoUbicacion', 'msg', 'listaComponentes', 'contadorPuntos',
+      'deteId', 'usuarioCreacion', 'fechaDete', 'fuenteDete', 'obsDete',
+      'lat', 'lng', 'utmZona', 'utmE', 'utmN',
+      'tipoComp', 'numComp', 'obsPunto',
+      'saveEventoBtn', 'saveUbicacionBtn', 'nuevaUbicacionBtn',
+      'addPuntoBtn', 'finalizarUbicacionBtn', 'cerrarEventoBtn',
+      'anpSelect'
+    ];
+    
+    ids.forEach(id => {
+      this.DOM[id] = document.getElementById(id);
+    });
+  },
+
+  msg(t, isError = false) {
+    const m = this.DOM.msg;
+    m.textContent = t;
+    m.className = "msg " + (isError ? "err" : "ok");
+  },
+
+  handleError(error, context) {
+    if (error) {
+      this.msg(`Error ${context}: ${error.message}`, true);
+      console.error(`Error ${context}:`, error);
+      return true;
+    }
+    return false;
+  },
+
+  setupListeners(elements, events, handler) {
+    elements.forEach(element => {
+      if (!element) return;
+      events.forEach(event => {
+        element.addEventListener(event, handler);
+      });
+    });
+  },
+
+  debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+};
+
+/* ================== MÓDULO DE COORDENADAS ================== */
+const CoordUtils = {
+  parse(v) {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim().replace(',', '.');
+    if (!s) return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  isValid(latv, lngv) {
+    return latv !== null && lngv !== null && 
+           latv >= -90 && latv <= 90 && 
+           lngv >= -180 && lngv <= 180;
+  },
+
+  format(n) {
+    return (typeof n === 'number' && Number.isFinite(n)) ? n.toFixed(6) : '—';
+  },
+
+  utmZoneFromLon(lon) {
+    return Math.floor((lon + 180) / 6) + 1;
+  },
+
+  updateUTMDisplay(latv, lngv) {
+    const { utmZona, utmE, utmN } = Utils.DOM;
+    if (!this.isValid(latv, lngv) || typeof proj4 === 'undefined') {
+      utmZona.value = ""; utmE.value = ""; utmN.value = "";
+      return;
+    }
+
+    const zone = this.utmZoneFromLon(lngv);
+    const hemi = (latv < 0) ? 'S' : 'N';
+    const utmDef = `+proj=utm +zone=${zone} ${latv < 0 ? '+south' : ''} +datum=WGS84 +units=m +no_defs`;
+
+    try {
+      const [x, y] = proj4('EPSG:4326', utmDef, [lngv, latv]);
+      utmZona.value = `${zone}${hemi}`;
+      utmE.value = Number.isFinite(x) ? Number(x).toFixed(2) : '';
+      utmN.value = Number.isFinite(y) ? Number(y).toFixed(2) : '';
+    } catch (err) {
+      utmZona.value = ""; utmE.value = ""; utmN.value = "";
+    }
+  },
+
+  parseUTMZone(zStr) {
+    const s = String(zStr || "").trim().toUpperCase();
+    const m = s.match(/^(\d{1,2})\s*([NS])$/);
+    if(!m) return null;
+    const zone = parseInt(m[1], 10);
+    const hemi = m[2];
+    if(!(zone >= 1 && zone <= 60)) return null;
+    return { zone, hemi };
+  },
+
+  parseNumberLoose(v) {
+    const s = String(v || "").trim().replace(/\s/g,'').replace(/,/g,'');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+};
+
+/* ================== MÓDULO DE ESTADO ================== */
+const AppState = (function() {
+  let state = {
+    session: null, // Datos de sesión
+    eventoGuardado: false,
+    eventoCerrado: false,
+    ubicIdActivo: null,
+    ubicacionEnProceso: false,
+    componentesCache: [],
+    latlng: null,
+    marker: null,
+    anpLayer: null,
+    svcLayer: null,
+    departamentosLayer: null,
+    departamentosCargados: false
+  };
+
+  const layers = {
+    puestosSernanp: L.layerGroup(),
+    puntos: L.layerGroup()
+  };
+
+  return {
+    get: (key) => state[key],
+    set: (key, value) => { state[key] = value; },
+    
+    getLayer: (name) => layers[name],
+    
+    resetUbicacion() {
+      state.ubicIdActivo = null;
+      state.ubicacionEnProceso = false;
+      state.componentesCache = [];
+      state.latlng = null;
+      if (state.marker) {
+        map.removeLayer(state.marker);
+        state.marker = null;
+      }
+    },
+
+    clearMapLayers() {
+      if (state.anpLayer) { map.removeLayer(state.anpLayer); state.anpLayer = null; }
+      if (state.svcLayer) { map.removeLayer(state.svcLayer); state.svcLayer = null; }
+      layers.puntos.clearLayers();
+      layers.puestosSernanp.clearLayers();
+    },
+
+    addLayerToMap(layerName) {
+      if (!map.hasLayer(layers[layerName])) {
+        layers[layerName].addTo(map);
+      }
+    },
+
+    removeLayerFromMap(layerName) {
+      if (map.hasLayer(layers[layerName])) {
+        map.removeLayer(layers[layerName]);
+      }
+    }
+  };
+})();
+
+/* ================== MÓDULO SUPABASE API ================== */
+const SupabaseAPI = {
+  client: null,
+
+  init(url, key) {
+    this.client = window.supabase.createClient(url, key);
+  },
+
+  async query(table, options = {}) {
+    const { select = '*', where = {}, single = false, count = false } = options;
+    let query = this.client.from(table).select(select, count ? { count: 'exact', head: true } : undefined);
+    
+    Object.entries(where).forEach(([key, value]) => {
+      if (value !== undefined) query = query.eq(key, value);
+    });
+
+    if (single) query = query.single();
+    
+    const { data, error, count: countResult } = await query;
+    
+    if (Utils.handleError(error, `consultando ${table}`)) {
+      return { data: null, error, count: 0 };
+    }
+    
+    return { data, error: null, count: countResult || data?.length || 0 };
+  },
+
+  async insert(table, data) {
+    const { data: result, error } = await this.client.from(table).insert(data).select().single();
+    if (Utils.handleError(error, `insertando en ${table}`)) {
+      return { data: null, error };
+    }
+    return { data: result, error: null };
+  },
+
+  async loadANPs() {
+    return this.query('v_anp_selector', { 
+      select: 'anp_cod, anp_nomb, extent_geojson',
+      where: {},
+      single: false 
+    });
+  },
+
+  async loadCatalogos() {
+    const [fuentes, tipos] = await Promise.all([
+      this.query('dom_fuente_deteccion', { select: 'fuente_cod, fuente_desc' }),
+      this.query('dom_tipo_componente', { select: 'tipo_cod, tipo_desc' })
+    ]);
+    
+    return { fuentes, tipos };
+  },
+
+  async loadDepartamentos() {
+    return this.query('departamentos', { 
+      select: 'geom, fuente, departamen, coddep, capital'
+    });
+  },
+
+  async loadPuestosSernanp(anpCod) {
+    if (!anpCod) return { data: [], error: null };
+    return this.query('puestos_sernanp', {
+      select: 'geom, nomb_infra, tipo_infra, anp_cod, infra_cod, obse_infra, acce_infra',
+      where: { anp_cod: anpCod }
+    });
+  },
+
+  async loadANPGeometry(anpCod) {
+    return this.query('anp_mineria_ilegal', {
+      select: 'geom',
+      where: { anp_cod: anpCod },
+      single: true
+    });
+  },
+
+  async loadSectorizacion(anpCod) {
+    return this.query('sectorizacion_vigilancia', {
+      select: 'geom',
+      where: { anp_cod: anpCod }
+    });
+  },
+
+  async generarDeteId(anpCod) {
+    const year = new Date().getFullYear();
+    const prefix = `${anpCod}_DET_${year}_`;
+
+    const { data, error } = await this.query('deteccion_evento', {
+      select: 'dete_id',
+      where: { anp_cod: anpCod }
+    });
+
+    if (error) return { deteId: null, error };
+
+    let max = 0;
+    const re = new RegExp(`^${anpCod}_DET_${year}_(\\d{3})$`);
+    (data || []).forEach(r => {
+      const m = String(r.dete_id || "").match(re);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+
+    return { 
+      deteId: `${anpCod}_DET_${year}_${String(max + 1).padStart(3, "0")}`, 
+      error: null 
+    };
+  },
+
+  async getContadores(dete_id) {
+    if (!dete_id) return { ubicaciones: 0, componentes: 0 };
+
+    const [ubicaciones, componentes] = await Promise.all([
+      this.query('deteccion_ubicacion', { 
+        where: { dete_id },
+        count: true 
+      }),
+      this.query('deteccion_view_componente', { 
+        where: { dete_id },
+        count: true 
+      })
+    ]);
+
+    return {
+      ubicaciones: ubicaciones.count || 0,
+      componentes: componentes.count || 0
+    };
+  },
+
+  async cargarUbicacionesEvento(dete_id) {
+    if (!dete_id) return { data: [], error: null };
+
+    return this.query('deteccion_view_ubicacion', {
+      select: 'ubic_id, geom, fuente_desc, fecha_dete',
+      where: { dete_id }
+    });
+  },
+
+  async cargarComponentesUbicacion(ubic_id) {
+    return this.query('deteccion_view_componente', {
+      select: 'tipo_desc, num_comp, obs_componente',
+      where: { ubic_id }
+    });
+  }
+};
+
+/* ================== MÓDULO UI MANAGER ================== */
+const UIManager = {
+  updateEventoStatus() {
+    const estado = AppState.get('eventoCerrado') ? "CERRADO" : 
+                  (AppState.get('eventoGuardado') ? "GUARDADO" : "NO guardado");
+    Utils.DOM.estadoEvento.textContent = `Estado evento: ${estado}`;
+  },
+
+  updateControlesEvento() {
+    const bloquearEvento = AppState.get('eventoGuardado') || AppState.get('eventoCerrado');
+    const { usuarioCreacion, fechaDete, fuenteDete, obsDete, saveEventoBtn } = Utils.DOM;
+    
+    [usuarioCreacion, fechaDete, fuenteDete, obsDete].forEach(el => {
+      el.disabled = bloquearEvento;
+    });
+    saveEventoBtn.disabled = AppState.get('eventoGuardado') || AppState.get('eventoCerrado');
+  },
+
+  updateUbicacionStatus() {
+    const latv = CoordUtils.parse(Utils.DOM.lat.value);
+    const lngv = CoordUtils.parse(Utils.DOM.lng.value);
+    const hasCoord = CoordUtils.isValid(latv, lngv);
+    
+    let texto = "Ubicación activa: ";
+    texto += hasCoord ? `Lat ${CoordUtils.format(latv)} / Lon ${CoordUtils.format(lngv)}` : "NO";
+    
+    const ubicIdActivo = AppState.get('ubicIdActivo');
+    if (ubicIdActivo) {
+      texto += ` (ubic_id: ${ubicIdActivo})`;
+    }
+    
+    Utils.DOM.estadoUbicacion.textContent = texto;
+  },
+
+  updateBotonesEstado() {
+    const { saveUbicacionBtn, nuevaUbicacionBtn, tipoComp, numComp, obsPunto, addPuntoBtn, finalizarUbicacionBtn, cerrarEventoBtn } = Utils.DOM;
+    
+    const hayEventoActivo = AppState.get('eventoGuardado') && !AppState.get('eventoCerrado');
+    const latv = CoordUtils.parse(Utils.DOM.lat.value);
+    const lngv = CoordUtils.parse(Utils.DOM.lng.value);
+    const hayCoordValida = CoordUtils.isValid(latv, lngv);
+    
+    saveUbicacionBtn.disabled = !(hayEventoActivo && hayCoordValida) || 
+                                !!AppState.get('ubicIdActivo') || 
+                                AppState.get('ubicacionEnProceso');
+    
+    nuevaUbicacionBtn.disabled = !hayEventoActivo;
+    
+    const hayUbicActiva = hayEventoActivo && !!AppState.get('ubicIdActivo');
+    [tipoComp, numComp, obsPunto].forEach(el => el.disabled = !hayUbicActiva);
+    addPuntoBtn.disabled = !hayUbicActiva;
+    finalizarUbicacionBtn.disabled = !hayUbicActiva;
+    
+    cerrarEventoBtn.disabled = !(AppState.get('eventoGuardado') && !AppState.get('eventoCerrado'));
+  },
+
+  updateUTMDisplay() {
+    const latv = CoordUtils.parse(Utils.DOM.lat.value);
+    const lngv = CoordUtils.parse(Utils.DOM.lng.value);
+    CoordUtils.updateUTMDisplay(latv, lngv);
+  },
+
+  renderComponentes() {
+    const cont = Utils.DOM.listaComponentes;
+    if (!cont) return;
+
+    const componentesCache = AppState.get('componentesCache');
+    const ubicIdActivo = AppState.get('ubicIdActivo');
+
+    if (!ubicIdActivo) {
+      cont.innerHTML = "<i style='color:#94a3b8'>Primero guarda una ubicación</i>";
+      return;
+    }
+
+    if (!componentesCache.length) {
+      cont.innerHTML = "<i style='color:#94a3b8'>Sin componentes registrados</i>";
+      return;
+    }
+
+    cont.innerHTML = componentesCache.map((c, i) => `
+      <div class="item">
+        <div><b>${c.tipo_desc || '-'}</b>${(c.num_comp !== null && c.num_comp !== undefined) ? ` · N° ${c.num_comp}` : ''}</div>
+        ${c.obs ? `<div style="color:#94a3b8; margin-top:4px;">${c.obs}</div>` : ''}
+        <button class="mini" data-i="${i}">Quitar</button>
+      </div>
+    `).join("");
+
+    cont.querySelectorAll("button.mini").forEach(btn => {
+      btn.onclick = () => {
+        const i = parseInt(btn.dataset.i, 10);
+        if (!Number.isFinite(i)) return;
+        componentesCache.splice(i, 1);
+        this.renderComponentes();
+      };
+    });
+  },
+
+  async updateContadores() {
+    const dete_id = Utils.DOM.deteId.value;
+    const { ubicaciones, componentes } = await SupabaseAPI.getContadores(dete_id);
+    Utils.DOM.contadorPuntos.textContent = `Ubicaciones: ${ubicaciones} | Componentes: ${componentes}`;
+  },
+
+  limpiarCamposComponente() {
+    const { tipoComp, numComp, obsPunto } = Utils.DOM;
+    tipoComp.value = "";
+    numComp.value = "";
+    obsPunto.value = "";
+  },
+
+  limpiarPunto() {
+    AppState.resetUbicacion();
+    Utils.DOM.lat.value = "";
+    Utils.DOM.lng.value = "";
+    CoordUtils.updateUTMDisplay(null, null);
+    App.setEstadoEvento();
+  }
+};
+
+/* ================== MÓDULO MAP MANAGER ================== */
+const MapManager = {
+  map: null,
+  departamentosLayer: null,
+
+  init(containerId) {
+    this.map = L.map(containerId, { boxZoom: true, maxZoom: 17 }).setView([-9.2, -75], 5);
+    L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 17 }
+    ).addTo(this.map);
+
+    AppState.getLayer('puntos').addTo(this.map);
+    
+    this.setupMapEvents();
+    
+    return this.map;
+  },
+
+  setupMapEvents() {
+    this.map.on("click", e => {
+      if (AppState.get('eventoCerrado')) return;
+      if (AppState.get('ubicIdActivo') || AppState.get('ubicacionEnProceso')) {
+        Utils.msg("⚠️ Finalice la ubicación actual antes de marcar otra.", true);
+        return;
+      }
+      App.setPoint(e.boxZoomBounds.getCenter());
+    });
+  },
+
+  async loadDepartamentos() {
+    if (AppState.get('departamentosCargados')) return;
+
+    const { data, error } = await SupabaseAPI.loadDepartamentos();
+    if (error) return;
+
+    this.departamentosLayer = L.geoJSON(null, {
+      interactive: false,
+      style: { color: "#22c55e", weight: 1.5, fillColor: "#22c55e", fillOpacity: 0.08 },
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const html = `<b>Departamento:</b> ${p.departamen ?? '-'}<br>` +
+                     `<b>Código:</b> ${p.coddep ?? '-'}<br>` +
+                     `<b>Capital:</b> ${p.capital ?? '-'}<br>` +
+                     `<b>Fuente:</b> ${p.fuente ?? '-'}`;
+        layer.bindPopup(html);
+      }
+    });
+
+    data.forEach(r => {
+      if (!r?.geom) return;
+      const feat = {
+        type: "Feature",
+        geometry: r.geom,
+        properties: {
+          fuente: r.fuente,
+          departamen: r.departamen,
+          coddep: r.coddep,
+          capital: r.capital
+        }
+      };
+      this.departamentosLayer.addData(feat);
+    });
+
+    this.departamentosLayer.addTo(this.map);
+    
+    if (!window._zoomDepartamentosAplicado) {
+      window._zoomDepartamentosAplicado = true;
+      const b = this.departamentosLayer.getBounds();
+      if (b && b.isValid && b.isValid()) {
+        this.map.fitBounds(b, { padding: [0, 0], animate: false });
+      }
+    }
+
+    AppState.set('departamentosCargados', true);
+    AppState.set('departamentosLayer', this.departamentosLayer);
+  },
+
+  async renderPuestosSernanp(anpCod) {
+    const layer = AppState.getLayer('puestosSernanp');
+    layer.clearLayers();
+    
+    if (!anpCod) {
+      AppState.removeLayerFromMap('puestosSernanp');
+      return;
+    }
+
+    const { data } = await SupabaseAPI.loadPuestosSernanp(anpCod);
+    
+    data.forEach(r => {
+      const g = r?.geom;
+      if (!g || !g.coordinates) return;
+      const lng = g.coordinates[0];
+      const lat = g.coordinates[1];
+
+      const m = L.circleMarker([lat, lng], {
+        radius: 6,
+        color: "#f97316",
+        weight: 2,
+        fillOpacity: 0.8
+      });
+
+      if (r.nomb_infra) {
+        m.bindTooltip(r.nomb_infra, {
+          permanent: true,
+          direction: 'top',
+          offset: [0, -8],
+          className: 'puesto-label'
+        });
+      }
+
+      const html = `<b>${r.nomb_infra ?? 'Puesto'}</b><br>` +
+                   `<b>Tipo:</b> ${r.tipo_infra ?? '-'}<br>` +
+                   `<b>ANP:</b> ${r.anp_cod ?? '-'}<br>` +
+                   `<b>Código:</b> ${r.infra_cod ?? '-'}<br>` +
+                   (r.acce_infra ? `<b>Acceso:</b> ${r.acce_infra}<br>` : '') +
+                   (r.obse_infra ? `<b>Obs.:</b> ${r.obse_infra}` : '');
+
+      m.bindPopup(html);
+      layer.addLayer(m);
+    });
+
+    AppState.addLayerToMap('puestosSernanp');
+  },
+
+  async renderUbicacionesEvento(dete_id) {
+    const layer = AppState.getLayer('puntos');
+    layer.clearLayers();
+    
+    if (!dete_id) return;
+
+    const { data } = await SupabaseAPI.cargarUbicacionesEvento(dete_id);
+
+    data.forEach(u => {
+      const g = u.geom;
+      if (!g || !g.coordinates) return;
+      const lng = g.coordinates[0];
+      const lat = g.coordinates[1];
+
+      const m = L.circleMarker([lat, lng], {
+        radius: 7,
+        color: "#38bdf8",
+        weight: 2,
+        fillOpacity: 0.65
+      });
+
+      m.on('click', async () => {
+        const { data: comps } = await SupabaseAPI.cargarComponentesUbicacion(u.ubic_id);
+        
+        let html = `<b>Ubicación:</b> ${u.ubic_id}<br>` +
+                   `<b>Fuente:</b> ${u.fuente_desc || '-'}<br>` +
+                   `<b>Fecha:</b> ${u.fecha_dete || '-'}<hr style="border:0;border-top:1px solid #334155;">`;
+
+        if (!comps || comps.length === 0) {
+          html += `<i>Sin componentes registrados</i>`;
+        } else {
+          html += `<b>Componentes:</b><br>`;
+          html += comps.map(r => {
+            const n = (r.num_comp ?? '-');
+            const o = (r.obs_componente ? ` – ${r.obs_componente}` : '');
+            return `• ${r.tipo_desc || '-'} (N°: ${n})${o}`;
+          }).join('<br>');
+        }
+
+        m.bindPopup(html).openPopup();
+      });
+
+      layer.addLayer(m);
+    });
+  },
+
+  async zoomToANP(anpCod) {
+    const { data } = await SupabaseAPI.loadANPGeometry(anpCod);
+    
+    if (data?.geom) {
+      AppState.set('anpLayer', L.geoJSON(data.geom, { 
+        style: { color: "#00ffff", weight: 2, fill: false } 
+      }).addTo(this.map));
+      
+      this.map.fitBounds(AppState.get('anpLayer').getBounds(), { 
+        paddingTopLeft: [-10, -10], 
+        paddingBottomRight: [-10, -10], 
+        maxZoom: 15 
+      });
+    }
+  },
+
+  async renderSectorizacion(anpCod) {
+    const { data } = await SupabaseAPI.loadSectorizacion(anpCod);
+    
+    if (data?.length) {
+      AppState.set('svcLayer', L.geoJSON(data.map(x => x.geom), { 
+        style: { color: "#ffd400", weight: 2, fill: false } 
+      }).addTo(this.map));
+    }
+  }
+};
+
+/* ================== MÓDULO PRINCIPAL ================== */
+const App = {
+  async init() {
+    // VERIFICAR SESIÓN PRIMERO
+    const session = checkSession();
+    if (!session) return; // Si no hay sesión, checkSession ya redirige
+    
+    AppState.set('session', session);
+    
+    // Inicializar módulos
+    Utils.initDOMCache();
+    SupabaseAPI.init(
+      "https://tewrzarmckrztcrmgfjo.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRld3J6YXJtY2tyenRjcm1nZmpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0ODQ3NTksImV4cCI6MjA3NzA2MDc1OX0.xeQnYEVAV_eIy7zVxFU9W2Fd0xjuF4v-tQjM2REPtCc"
+    );
+    
+    // Inicializar mapa
+    const map = MapManager.init('map');
+    window.map = map;
+
+    // Pre-seleccionar el ANP de la sesión
+    await this.loadANPAutorizado(session.anp_cod, session.anp_nomb);
+    
+    // Cargar datos iniciales
+    await this.loadInitialData();
+    
+    // Configurar eventos
+    this.setupEventListeners();
+    
+    // Estado inicial
+    this.setEstadoEvento();
+    
+    // Cargar datos del ANP autorizado
+    await this.loadANPData(session.anp_cod);
+  },
+
+  async loadANPAutorizado(anpCod, anpNomb) {
+    const select = Utils.DOM.anpSelect;
+    
+    // Mostrar solo el ANP autorizado y bloquearlo
+    select.innerHTML = `<option value="${anpCod}" selected>${anpCod} - ${anpNomb}</option>`;
+    select.disabled = true;
+    select.classList.add('anp-locked');
+    
+    // Generar dete_id
+    const { deteId } = await SupabaseAPI.generarDeteId(anpCod);
+    if (deteId) {
+      Utils.DOM.deteId.value = deteId;
+    }
+    
+    Utils.msg(`✅ Acceso autorizado a ${anpCod}`);
+  },
+
+  async loadInitialData() {
+    await Promise.all([
+      this.loadCatalogos(),
+      MapManager.loadDepartamentos()
+    ]);
+  },
+
+  async loadCatalogos() {
+    const { fuentes, tipos } = await SupabaseAPI.loadCatalogos();
+    
+    const fuenteSelect = Utils.DOM.fuenteDete;
+    fuenteSelect.innerHTML = "<option value=''>— Seleccione —</option>";
+    (fuentes.data || []).forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.fuente_cod;
+      o.textContent = r.fuente_desc;
+      fuenteSelect.appendChild(o);
+    });
+
+    const tipoSelect = Utils.DOM.tipoComp;
+    tipoSelect.innerHTML = "<option value=''>— Seleccione —</option>";
+    (tipos.data || []).forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.tipo_cod;
+      o.textContent = r.tipo_desc;
+      tipoSelect.appendChild(o);
+    });
+  },
+
+  async loadANPData(anpCod) {
+    await Promise.all([
+      MapManager.renderPuestosSernanp(anpCod),
+      MapManager.zoomToANP(anpCod),
+      MapManager.renderSectorizacion(anpCod),
+      UIManager.updateContadores(),
+      MapManager.renderUbicacionesEvento(Utils.DOM.deteId.value)
+    ]);
+  },
+
+  setupEventListeners() {
+    const { saveEventoBtn, saveUbicacionBtn, nuevaUbicacionBtn, 
+            addPuntoBtn, finalizarUbicacionBtn, cerrarEventoBtn, lat, lng, 
+            utmZona, utmE, utmN } = Utils.DOM;
+
+    saveEventoBtn.onclick = () => this.guardarEvento();
+    saveUbicacionBtn.onclick = () => this.guardarUbicacion();
+    nuevaUbicacionBtn.onclick = () => this.nuevaUbicacion();
+    addPuntoBtn.onclick = () => this.agregarComponente();
+    finalizarUbicacionBtn.onclick = () => this.finalizarUbicacion();
+    cerrarEventoBtn.onclick = () => this.cerrarEvento();
+
+    Utils.setupListeners([lat, lng], ['change', 'blur'], () => this.syncFromInputsToMap());
+    
+    [lat, lng].forEach(el => {
+      el.addEventListener('keydown', (ev) => { 
+        if (ev.key === 'Enter') this.syncFromInputsToMap(); 
+      });
+    });
+
+    const handleUTMChange = () => this.applyUTMInputsToMap();
+    Utils.setupListeners([utmZona, utmE, utmN], ['change', 'blur'], handleUTMChange);
+    [utmE, utmN].forEach(el => {
+      el.addEventListener('keydown', (e) => { 
+        if(e.key === 'Enter') handleUTMChange(); 
+      });
+    });
+  },
+
+  setEstadoEvento() {
+    UIManager.updateEventoStatus();
+    UIManager.updateControlesEvento();
+    UIManager.updateUbicacionStatus();
+    UIManager.updateBotonesEstado();
+    UIManager.updateUTMDisplay();
+    UIManager.renderComponentes();
+  },
+
+  setPoint(ll) {
+    if (AppState.get('eventoCerrado')) { 
+      Utils.msg("El registro ya está cerrado.", true); 
+      return; 
+    }
+
+    AppState.set('latlng', ll);
+    Utils.DOM.lat.value = ll.lat.toFixed(6);
+    Utils.DOM.lng.value = ll.lng.toFixed(6);
+
+    if (AppState.get('marker')) {
+      map.removeLayer(AppState.get('marker'));
+    }
+
+    const marker = L.marker(ll, { draggable: true }).addTo(map);
+    marker.on('dragend', () => {
+      const p = marker.getLatLng();
+      AppState.set('latlng', p);
+      Utils.DOM.lat.value = p.lat.toFixed(6);
+      Utils.DOM.lng.value = p.lng.toFixed(6);
+      this.setEstadoEvento();
+    });
+
+    AppState.set('marker', marker);
+    this.setEstadoEvento();
+  },
+
+  syncFromInputsToMap() {
+    const latv = CoordUtils.parse(Utils.DOM.lat.value);
+    const lngv = CoordUtils.parse(Utils.DOM.lng.value);
+    
+    if (!CoordUtils.isValid(latv, lngv)) {
+      this.setEstadoEvento();
+      return;
+    }
+    
+    const ll = L.latLng(latv, lngv);
+    AppState.set('latlng', ll);
+    
+    if (AppState.get('marker')) {
+      AppState.get('marker').setLatLng(ll);
+    } else {
+      const marker = L.marker(ll, { draggable: true }).addTo(map);
+      marker.on('dragend', () => {
+        const p = marker.getLatLng();
+        AppState.set('latlng', p);
+        Utils.DOM.lat.value = p.lat.toFixed(6);
+        Utils.DOM.lng.value = p.lng.toFixed(6);
+        this.setEstadoEvento();
+      });
+      AppState.set('marker', marker);
+    }
+    
+    this.setEstadoEvento();
+  },
+
+  applyUTMInputsToMap() {
+    const z = CoordUtils.parseUTMZone(Utils.DOM.utmZona.value);
+    const E = CoordUtils.parseNumberLoose(Utils.DOM.utmE.value);
+    const N = CoordUtils.parseNumberLoose(Utils.DOM.utmN.value);
+    
+    if(!z || E === null || N === null) { 
+      this.setEstadoEvento(); 
+      return; 
+    }
+
+    const utmDef = `+proj=utm +zone=${z.zone} ${z.hemi === 'S' ? '+south' : ''} +datum=WGS84 +units=m +no_defs`;
+
+    try {
+      const [lngv, latv] = proj4(utmDef, 'EPSG:4326', [E, N]);
+      Utils.DOM.lat.value = Number(latv).toFixed(6);
+      Utils.DOM.lng.value = Number(lngv).toFixed(6);
+      this.syncFromInputsToMap();
+    } catch (err) {
+      this.setEstadoEvento();
+    }
+  },
+
+  async guardarEvento() {
+    const dete_id = Utils.DOM.deteId.value;
+    const anp_cod = Utils.DOM.anpSelect.value;
+
+    if (!anp_cod) { Utils.msg("Error: ANP no seleccionado", true); return; }
+    if (!dete_id) { Utils.msg("No se pudo generar dete_id", true); return; }
+
+    const payloadEvento = {
+      dete_id,
+      anp_cod,
+      usuario_creacion: Utils.DOM.usuarioCreacion.value || null,
+      fecha_dete: Utils.DOM.fechaDete.value || null,
+      fuente_dete: Utils.DOM.fuenteDete.value || null,
+      obs_dete: Utils.DOM.obsDete.value || null
+    };
+
+    const { error } = await SupabaseAPI.insert("deteccion_evento", payloadEvento);
+    
+    if (error && error.code !== "23505") {
+      Utils.msg("Error evento: " + error.message, true);
+      return;
+    }
+
+    AppState.set('eventoGuardado', true);
+    this.setEstadoEvento();
+    Utils.msg("✅ Evento guardado. Ahora seleccione una ubicación en el mapa y guárdela.");
+  },
+
+  async guardarUbicacion() {
+    const dete_id = Utils.DOM.deteId.value;
+
+    if (AppState.get('ubicacionEnProceso')) {
+      Utils.msg("⚠️ Ya se está guardando esta ubicación.", true);
+      return;
+    }
+
+    if (!AppState.get('eventoGuardado')) { Utils.msg("Primero guarde el evento.", true); return; }
+    if (AppState.get('eventoCerrado')) { Utils.msg("El evento ya fue cerrado.", true); return; }
+    if (!AppState.get('latlng')) { Utils.msg("Seleccione una ubicación (clic o zona).", true); return; }
+
+    AppState.set('ubicacionEnProceso', true);
+    Utils.DOM.saveUbicacionBtn.disabled = true;
+
+    const { data, error } = await SupabaseAPI.insert('deteccion_ubicacion', {
+      dete_id,
+      geom: `SRID=4326;POINT(${AppState.get('latlng').lng} ${AppState.get('latlng').lat})`,
+      latitud: AppState.get('latlng').lat,
+      longitud: AppState.get('latlng').lng
+    });
+
+    if (error) {
+      AppState.set('ubicacionEnProceso', false);
+      this.setEstadoEvento();
+      Utils.msg("Error guardando ubicación: " + error.message, true);
+      return;
+    }
+
+    AppState.set('ubicIdActivo', data.ubic_id);
+    AppState.set('componentesCache', []);
+    
+    this.setEstadoEvento();
+    Utils.msg(`✅ Ubicación guardada (ID: ${data.ubic_id}). Ahora agregue componentes.`);
+    
+    await Promise.all([
+      UIManager.updateContadores(),
+      MapManager.renderUbicacionesEvento(dete_id)
+    ]);
+  },
+
+  nuevaUbicacion() {
+    if (!AppState.get('eventoGuardado')) { Utils.msg("Primero guarde el evento.", true); return; }
+    if (AppState.get('eventoCerrado')) { Utils.msg("El evento ya fue cerrado.", true); return; }
+    
+    this.finalizarUbicacion();
+    Utils.msg("Seleccione una nueva ubicación en el mapa.");
+  },
+
+  async agregarComponente() {
+    if (!AppState.get('eventoGuardado')) { Utils.msg("Primero guarde el evento.", true); return; }
+    if (AppState.get('eventoCerrado')) { Utils.msg("El evento ya fue cerrado.", true); return; }
+    if (!AppState.get('ubicIdActivo')) { Utils.msg("Primero guarde una ubicación.", true); return; }
+    if (!Utils.DOM.tipoComp.value) { Utils.msg("Seleccione el tipo de componente.", true); return; }
+
+    const payload = {
+      ubic_id: AppState.get('ubicIdActivo'),
+      tipo_comp: Utils.DOM.tipoComp.value,
+      num_comp: (Utils.DOM.numComp.value === "" ? null : Number(Utils.DOM.numComp.value)),
+      obs_componente: Utils.DOM.obsPunto.value || null
+    };
+
+    const { error } = await SupabaseAPI.insert('deteccion_componente', payload);
+    if (error) { 
+      Utils.msg("Error componente: " + error.message, true); 
+      return; 
+    }
+
+    const componentesCache = AppState.get('componentesCache');
+    componentesCache.push({
+      tipo_desc: (Utils.DOM.tipoComp.options[Utils.DOM.tipoComp.selectedIndex]?.text || Utils.DOM.tipoComp.value),
+      num_comp: (Utils.DOM.numComp.value === "" ? null : Number(Utils.DOM.numComp.value)),
+      obs: (Utils.DOM.obsPunto.value || null)
+    });
+    
+    AppState.set('componentesCache', componentesCache);
+    
+    UIManager.renderComponentes();
+    Utils.msg("✅ Componente agregado a la ubicación.");
+    UIManager.limpiarCamposComponente();
+    await UIManager.updateContadores();
+  },
+
+  finalizarUbicacion() {
+    if (!AppState.get('ubicIdActivo')) { 
+      Utils.msg("No hay ubicación activa.", true); 
+      return; 
+    }
+    
+    AppState.resetUbicacion();
+    UIManager.limpiarCamposComponente();
+    this.setEstadoEvento();
+    Utils.msg("✅ Ubicación finalizada. Puede registrar otra ubicación.");
+  },
+
+  cerrarEvento() {
+    if (!AppState.get('eventoGuardado')) { 
+      Utils.msg("Primero debe guardar el evento.", true); 
+      return; 
+    }
+    
+    AppState.set('eventoCerrado', true);
+    AppState.set('ubicIdActivo', null);
+    this.setEstadoEvento();
+    Utils.msg("✅ Evento cerrado. Las ubicaciones quedan visibles.");
+  }
+};
+
+/* ================== INICIALIZACIÓN ================== */
+document.addEventListener('DOMContentLoaded', () => {
+  App.init();
+});
+</script>
+</body>
+</html>latlng);
+    });
+
+    this.map.on("boxzoomend", e => {
+      if (AppState.get('eventoCerrado')) return;
+      if (AppState.get('ubicIdActivo') || AppState.get('ubicacionEnProceso')) {
+        Utils.msg("⚠️ Finalice la ubicación actual antes de marcar otra.", true);
+        return;
+      }
+      App.setPoint(e.
