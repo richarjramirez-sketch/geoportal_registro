@@ -702,7 +702,7 @@ async function cargarUbicacionesEvento() {
 /* ================== CARGAR ANP ================== */
 async function loadANP(){
   const { data, error } = await supabase
-    .from("v_anp_selector")
+    .from("v_anp_selector_secure")
     .select("anp_cod, anp_nomb, extent_geojson")
     .order("anp_nomb");
 
