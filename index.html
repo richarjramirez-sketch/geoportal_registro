@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Geoportal Unificado — Acceso</title>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#020617; --border:#1e293b; --text:#e5e7eb; --muted:#94a3b8;
+      --btn:#2563eb; --btn2:#0ea5e9; --btn3:#475569; --bad:#ef4444; --ok:#22c55e;
+    }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family: Arial, sans-serif; background:var(--bg); color:var(--text); height:100vh; }
+    body.locked main{ display:none; }
+    body.locked header{ display:none; }
+    header{
+      height:50px; display:flex; align-items:center; justify-content:space-between;
+      padding:10px 14px; background:var(--panel); border-bottom:1px solid var(--border);
+    }
+    .title{ font-weight:800; }
+    .tabs{ display:flex; gap:8px; align-items:center; }
+    .tab{
+      border:1px solid #334155; background:#111827; color:var(--text);
+      padding:8px 10px; border-radius:10px; cursor:pointer; font-weight:700; font-size:13px;
+    }
+    .tab[aria-selected="true"]{ background:var(--btn); border-color:var(--btn); }
+    .right{ display:flex; gap:10px; align-items:center; color:var(--muted); font-size:12px; }
+    main{ height:calc(100vh - 50px); }
+
+    iframe{ width:100%; height:100%; border:0; display:none; background:var(--bg); }
+    iframe.active{ display:block; }
+
+    /* Login overlay */
+    #loginOverlay{
+      position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      background:rgba(2,6,23,.78); z-index:9999;
+    }
+    .card{
+      width:min(520px, calc(100% - 24px));
+      background:#0b1220; border:1px solid var(--border); border-radius:16px;
+      padding:16px;
+      box-shadow:0 20px 60px rgba(0,0,0,.35);
+    }
+    .card h2{ margin:0 0 8px 0; font-size:18px; }
+    .card p{ margin:0 0 12px 0; color:var(--muted); font-size:13px; line-height:1.35; }
+    .row{ display:flex; gap:8px; }
+    input{
+      flex:1; padding:10px 12px; border-radius:10px; border:1px solid #334155;
+      background:#0f172a; color:var(--text);
+    }
+    button.primary{
+      padding:10px 12px; border-radius:10px; border:1px solid var(--btn);
+      background:var(--btn); color:white; font-weight:800; cursor:pointer;
+    }
+    button.ghost{
+      padding:8px 10px; border-radius:10px; border:1px solid #334155;
+      background:#111827; color:var(--text); font-weight:700; cursor:pointer;
+    }
+    #statusMsg{ margin-top:10px; font-size:13px; color:var(--muted); }
+    .tag{ padding:3px 8px; border:1px solid #334155; border-radius:999px; font-size:12px; color:var(--muted); }
+    .ok{ color:var(--ok); }
+    .bad{ color:var(--bad); }
+  </style>
+</head>
+<body class="locked">
+<header>
+  <div class="title">Geoportal Unificado</div>
+
+  <div class="tabs" role="tablist" aria-label="Visores">
+    <button class="tab" id="tabDet" role="tab" aria-controls="frameDet" aria-selected="true">Detección</button>
+    <button class="tab" id="tabOp" role="tab" aria-controls="frameOp" aria-selected="false">Operativos</button>
+  </div>
+
+  <div class="right">
+    <span id="userTag" class="tag">No autenticado</span>
+    <button id="btnSignOut" class="ghost" style="display:none;">Cerrar sesión</button>
+  </div>
+</header>
+
+<main>
+  <iframe id="frameDet" class="active" src="./deteccion_v2.html" title="Visor Detección"></iframe>
+  <iframe id="frameOp" src="./operativos_v3.html" title="Visor Operativos"></iframe>
+</main>
+
+<div id="loginOverlay">
+  <div class="card">
+    <h2>Acceso al Geoportal</h2>
+    <p>Ingresa tu correo. Te enviaremos un <b>Magic Link</b> para acceder. El acceso estará restringido según tu ANP asignada.</p>
+    <div class="row">
+      <input id="emailInput" type="email" placeholder="correo@sernanp.gob.pe" autocomplete="email" />
+      <button id="btnSendLink" class="primary">Enviar link</button>
+    </div>
+    <div id="statusMsg"></div>
+  </div>
+</div>
+
+<!-- Supabase JS (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // ⚠️ Nota: el URL y la anon key en un sitio estático son visibles.
+  // La seguridad real la aplica RLS en Supabase.
+  const SUPABASE_URL = 'https://tewrzarmckrztcrmgfjo.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRld3J6YXJtY2tyenRjcm1nZmpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0ODQ3NTksImV4cCI6MjA3NzA2MDc1OX0.xeQnYEVAV_eIy7zVxFU9W2Fd0xjuF4v-tQjM2REPtCc';
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const tabDet = document.getElementById('tabDet');
+  const tabOp  = document.getElementById('tabOp');
+  const frameDet = document.getElementById('frameDet');
+  const frameOp  = document.getElementById('frameOp');
+
+  const loginOverlay = document.getElementById('loginOverlay');
+  const emailInput = document.getElementById('emailInput');
+  const btnSendLink = document.getElementById('btnSendLink');
+  const statusMsg = document.getElementById('statusMsg');
+  const userTag = document.getElementById('userTag');
+  const btnSignOut = document.getElementById('btnSignOut');
+
+  let __userAccess = null; // { role, anp_cod }
+
+  function activate(which){
+    const isDet = which === 'det';
+    frameDet.classList.toggle('active', isDet);
+    frameOp.classList.toggle('active', !isDet);
+    tabDet.setAttribute('aria-selected', isDet ? 'true' : 'false');
+    tabOp.setAttribute('aria-selected', !isDet ? 'true' : 'false');
+
+    // Avisar al iframe activo para recalcular tamaño/zoom
+    try {
+      const msg = isDet ? { type:'activate', view:'det' } : { type:'activate', view:'op' };
+      (isDet ? frameDet : frameOp).contentWindow?.postMessage(msg, '*');
+      // Reenviar restricción de ANP (por si el iframe aún no la recibió)
+      if (__userAccess) {
+        (isDet ? frameDet : frameOp).contentWindow?.postMessage({ type:'set_anp', ...__userAccess }, '*');
+      }
+    } catch(e) {}
+  }
+
+  tabDet.addEventListener('click', ()=>activate('det'));
+  tabOp.addEventListener('click', ()=>activate('op'));
+
+  window.addEventListener('keydown', (e)=>{
+    if(!e.ctrlKey) return;
+    if(e.key === '1') activate('det');
+    if(e.key === '2') activate('op');
+  });
+
+  async function loadAccessAndPush(session){
+    const email = session?.user?.email || '';
+    // Consultar permisos (RLS: usuario normal solo verá su fila; admin ve todo)
+    const { data, error } = await sb
+      .from('user_anp_access')
+      .select('role, anp_cod, is_active')
+      .eq('email', email)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error || !data) {
+      __userAccess = null;
+      statusMsg.innerHTML = '<span class="bad">No tienes permisos asignados (user_anp_access). Contacta al administrador.</span>';
+      // Mantener overlay bloqueando acceso
+      loginOverlay.style.display = 'flex'; document.body.classList.add('locked');
+      return;
+    }
+
+    __userAccess = { role: data.role, anp_cod: data.anp_cod || null };
+
+    // Enviar alos dos visores: restringir ANP (o admin)
+    try {
+      frameDet.contentWindow?.postMessage({ type:'set_anp', ...__userAccess }, '*');
+      frameOp.contentWindow?.postMessage({ type:'set_anp', ...__userAccess }, '*');
+    } catch(e) {}
+  }
+
+  function setLoggedUI(session){
+    const email = session?.user?.email;
+    if(email){
+      userTag.textContent = email;
+      userTag.classList.remove('bad');
+      userTag.classList.add('ok');
+      btnSignOut.style.display = 'inline-block';
+      loginOverlay.style.display = 'none'; document.body.classList.remove('locked');
+    } else {
+      userTag.textContent = 'No autenticado';
+      userTag.classList.remove('ok');
+      userTag.classList.add('bad');
+      btnSignOut.style.display = 'none';
+      loginOverlay.style.display = 'flex'; document.body.classList.add('locked');
+    }
+  }
+
+  btnSendLink.addEventListener('click', async ()=>{
+    const email = (emailInput.value || '').trim();
+    if(!email) {
+      statusMsg.innerHTML = '<span class="bad">Ingresa un correo.</span>';
+      return;
+    }
+    btnSendLink.disabled = true;
+    statusMsg.textContent = 'Enviando Magic Link...';
+    try {
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: window.location.href
+        }
+      });
+      if (error) {
+        statusMsg.innerHTML = '<span class="bad">' + error.message + '</span>';
+      } else {
+        statusMsg.innerHTML = '<span class="ok">Listo. Revisa tu correo y abre el link para ingresar.</span>';
+      }
+    } finally {
+      btnSendLink.disabled = false;
+    }
+  });
+
+  btnSignOut.addEventListener('click', async ()=>{
+    await sb.auth.signOut();
+    __userAccess = null;
+    statusMsg.textContent = '';
+    setLoggedUI(null);
+  });
+
+  // Al cargar: verificar sesión actual
+  (async ()=>{
+    const { data } = await sb.auth.getSession();
+    const session = data?.session || null;
+    setLoggedUI(session);
+    if(session) await loadAccessAndPush(session);
+  })();
+
+  // Escuchar cambios de sesión
+  sb.auth.onAuthStateChange(async (event, session)=>{
+    setLoggedUI(session);
+    if(session) {
+      statusMsg.textContent = '';
+      await loadAccessAndPush(session);
+    }
+  });
+</script>
+</body>
+</html>
