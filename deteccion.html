@@ -988,6 +988,49 @@ cerrarEventoBtn.onclick = () => {
   msg("✅ Evento cerrado. Las ubicaciones quedan visibles.");
 };
 
+/* ================== MAGIC LINK: SET ANP DESDE INDEX ================== */
+let __pendingAccess = null;
+
+function applyAccessFromIndex(access){
+  if(!access || !access.anp_cod) return;
+
+  const anpCod = access.anp_cod;
+  const role = access.role || 'user';
+
+  if (!anpSelect || anpSelect.options.length <= 1) {
+    __pendingAccess = access;
+    return;
+  }
+
+  anpSelect.value = anpCod;
+
+  if (anpSelect.value !== anpCod) {
+    __pendingAccess = access;
+    return;
+  }
+
+  if (role !== 'admin') {
+    anpSelect.disabled = true;
+  }
+
+  anpSelect.dispatchEvent(new Event('change', { bubbles:true }));
+  __pendingAccess = null;
+}
+
+window.addEventListener('message', (ev) => {
+  const d = ev.data || {};
+  if (d.type === 'set_anp') {
+    applyAccessFromIndex({ role: d.role, anp_cod: d.anp_cod });
+  }
+});
+
+// Hook seguro para loadANP()
+const __loadANP_original = loadANP;
+loadANP = async function(){
+  await __loadANP_original();
+  if (__pendingAccess) applyAccessFromIndex(__pendingAccess);
+};
+
 /* INIT */
 setEstadoEvento();
 loadCatalogos();
