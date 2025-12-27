@@ -418,7 +418,7 @@ let compCache = [];   // lista local de componentes agregados para la ubicación
 async function cargarANP(){
   try{
     const { data, error } = await supabase
-      .from("v_anp_selector")
+      .from("v_anp_selector_secure")
       .select("anp_cod, anp_nomb, extent_geojson")
       .order("anp_nomb", { ascending:true });
 
